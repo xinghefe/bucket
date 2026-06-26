@@ -28,12 +28,11 @@
           type="file"
           ref="fileInput"
           class="hidden"
-          accept="image/*"
           @change="handleFileChange"
         >
         <div class="text-gray-500">
           <i class="i-carbon-upload text-3xl mb-2"></i>
-          <p class="text-sm">{{ uploading ? '上传中...' : '点击或拖拽图片上传' }}</p>
+          <p class="text-sm">{{ uploading ? '上传中...' : '点击或拖拽文件上传' }}</p>
         </div>
       </div>
     </div>
@@ -47,7 +46,7 @@
       <input
         v-model="searchQuery"
         type="text"
-        placeholder="搜索图片"
+        placeholder="搜索文件"
         class="flex-1 p-2 rounded border"
       >
     </div>
@@ -59,7 +58,7 @@
       </div>
       
       <div v-if="filteredImages.length === 0" class="text-center py-10 text-gray-500">
-        暂无图片
+        暂无文件
       </div>
       
       <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
@@ -68,13 +67,25 @@
           :key="image.url"
           class="group relative bg-white rounded-lg shadow overflow-hidden hover:shadow-lg transition-shadow"
         >
-          <img
-            :src="image.url"
-            :alt="image.name"
-            class="w-full aspect-square object-cover cursor-zoom-in"
-            loading="lazy"
+          <div
+            v-if="isImage(image.name)"
+            class="relative"
             @click="previewImage(image)"
           >
+            <img
+              :src="image.url"
+              :alt="image.name"
+              class="w-full aspect-square object-cover cursor-zoom-in"
+              loading="lazy"
+            >
+          </div>
+          <div
+            v-else
+            class="w-full aspect-square flex items-center justify-center bg-gray-50 cursor-pointer"
+            @click="downloadFile(image.url, image.name)"
+          >
+            <i class="i-carbon-document text-6xl text-gray-400"></i>
+          </div>
           <div class="p-2 bg-white">
             <p class="truncate text-sm" :title="image.name">{{ image.name }}</p>
             <div class="flex gap-2 mt-2">
@@ -209,23 +220,25 @@ const compressWithTinyPNG = async (file: File): Promise<File> => {
 const handleUpload = async (options: any) => {
   try {
     uploading.value = true;
-    let compressedFile: File;
+    let fileToUpload: File;
 
-    // Try TinyPNG first (via Serverless Function)
-    try {
-      console.log('Attempting TinyPNG compression...');
-      compressedFile = await compressWithTinyPNG(options.file);
-      console.log(`TinyPNG Success: ${(options.file.size / 1024).toFixed(2)}KB -> ${(compressedFile.size / 1024).toFixed(2)}KB`);
-    } catch (error) {
-      // Fallback to local compression
-      console.log('Falling back to local compression...', error);
-      compressedFile = await compressImage(options.file);
-      console.log(`Local Compression: ${(options.file.size / 1024).toFixed(2)}KB -> ${(compressedFile.size / 1024).toFixed(2)}KB`);
+    if (options.file.type.startsWith('image/')) {
+      try {
+        console.log('Attempting TinyPNG compression...');
+        fileToUpload = await compressWithTinyPNG(options.file);
+        console.log(`TinyPNG Success: ${(options.file.size / 1024).toFixed(2)}KB -> ${(fileToUpload.size / 1024).toFixed(2)}KB`);
+      } catch (error) {
+        console.log('Falling back to local compression...', error);
+        fileToUpload = await compressImage(options.file);
+        console.log(`Local Compression: ${(options.file.size / 1024).toFixed(2)}KB -> ${(fileToUpload.size / 1024).toFixed(2)}KB`);
+      }
+    } else {
+      fileToUpload = options.file;
     }
 
-    const url = await githubService.uploadImage(compressedFile, currentFolder.value);
+    const url = await githubService.uploadImage(fileToUpload, currentFolder.value);
     images.value.unshift({
-      name: compressedFile.name,
+      name: fileToUpload.name,
       url
     });
     toast.value?.success('上传成功');
@@ -245,7 +258,7 @@ const copyUrl = (url: string) => {
 const deleteImage = async (image: { name: string; url: string }) => {
   try {
     const path = `images/${image.name}`;
-    const confirmed = window.confirm('确定要删除这张图片吗？');
+    const confirmed = window.confirm('确定要删除这个文件吗？');
     
     if (confirmed) {
       loading.value = true;
@@ -282,7 +295,7 @@ const handleFileChange = (e: Event) => {
 
 const handleDrop = (e: DragEvent) => {
   const file = e.dataTransfer?.files[0]
-  if (file?.type.startsWith('image/')) {
+  if (file) {
     handleUpload({ file })
   }
 }
@@ -304,12 +317,32 @@ const closePreview = () => {
   previewVisible.value = false;
 };
 
+const isImage = (name: string): boolean => {
+  const ext = name.split('.').pop()?.toLowerCase();
+  return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'ico', 'avif'].includes(ext || '');
+};
+
+const downloadFile = async (url: string, name: string) => {
+  try {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(blobUrl);
+  } catch {
+    window.open(url, '_blank');
+  }
+};
+
 watch(currentFolder, async () => {
   try {
     loading.value = true;
     images.value = await githubService.getImageList(currentFolder.value);
   } catch (error) {
-    toast.value?.error('获取图片列表失败');
+    toast.value?.error('获取文件列表失败');
   } finally {
     loading.value = false;
   }
